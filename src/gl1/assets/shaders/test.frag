@@ -1,3 +1,4 @@
+#include <shaders/shadeCommon.h>
 #include <shaders/common.h>
 
 in block

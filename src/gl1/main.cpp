@@ -20,6 +20,8 @@
 #include <texture.h>
 #include <shader.h>
 
+#include <common.h>
+
 // forward declaration
 bool checkExtensitions();
 void update();
@@ -111,10 +113,17 @@ struct PerFrameData
 };
 // avoid mapping unmapping per frame
 PerFrameData *g_perFramePersistentPtr{nullptr};
+// uniform Block is backed up by buffer
+GLuint g_perFrameDataUniformBlockHandle;
 GLuint g_perFrameDataBufferHandle;
+// measure in bytes
+GLint g_perFrameDataUniformBlockSize;
+// this cpu-side measurement is not precise if the glsl compiler does optim
 const GLsizeiptr g_perFrameDataBufferSize = sizeof(vec3f) * NUM_CUBES;
 
+GLuint g_instancingOffsetUniformBlockHandle;
 GLuint g_instancingOffsetBufferHandle;
+GLint g_instancingOffsetUniformBlockSize;
 const GLsizeiptr g_instancingOffsetBufferSize = sizeof(PerFrameData);
 
 // indirect-draw buffer handle
@@ -384,12 +393,12 @@ void render()
     *g_perFramePersistentPtr = perFrameData;
 
     // this is for rendering
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_perFrameDataBufferHandle);
+    glBindBufferBase(GL_UNIFORM_BUFFER, PER_FRAME_DATA, g_perFrameDataBufferHandle);
     // bindless texture handle
     // ub slot: 1
-    glBindBufferBase(GL_UNIFORM_BUFFER, 1, g_bindlessHandleUniformBufferHandle);
+    glBindBufferBase(GL_UNIFORM_BUFFER, MATERIAL, g_bindlessHandleUniformBufferHandle);
     // cube position buffer
-    glBindBufferBase(GL_UNIFORM_BUFFER, 2, g_instancingOffsetBufferHandle);
+    glBindBufferBase(GL_UNIFORM_BUFFER, INSTANCING, g_instancingOffsetBufferHandle);
     // glDrawArraysInstanced(GL_TRIANGLES, 0, 36, NUM_CUBES);
     // glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, NUM_CUBES, 0);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g_indirectDrawBufferHandle);
@@ -451,6 +460,13 @@ int main()
 
     const auto vs = Shader("shaders/test.vert");
     const auto fs = Shader("shaders/test.frag");
+    g_perFrameDataBufferHandle = glGetUniformBlockIndex(vs.programHandle(), "perFrameData");
+    g_instancingOffsetUniformBlockHandle = glGetUniformBlockIndex(vs.programHandle(), "instancingData");
+
+    glGetActiveUniformBlockiv(vs.programHandle(), g_perFrameDataBufferHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
+                              &g_perFrameDataUniformBlockSize);
+    glGetActiveUniformBlockiv(vs.programHandle(), g_instancingOffsetUniformBlockHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
+                              &g_instancingOffsetUniformBlockSize);
 
     g_ShaderProgramPipeline = make_unique<Pipeline>(unordered_map<GLenum, GLuint>{
         {GL_VERTEX_SHADER_BIT, vs.programHandle()},
@@ -490,9 +506,10 @@ int main()
     // requires opengl 4.5
     // glCreateBuffers is the equivalent of glGenBuffers + glBindBuffer(the initialization part)
     glCreateBuffers(1, &g_perFrameDataBufferHandle);
+
     // no data to copy during init
     // glNamedBufferStorage(g_perFrameDataBufferHandle, g_perFrameDataBufferSize, nullptr, GL_DYNAMIC_STORAGE_BIT);
-    glNamedBufferStorage(g_perFrameDataBufferHandle, g_perFrameDataBufferSize, nullptr, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+    glNamedBufferStorage(g_perFrameDataBufferHandle, g_perFrameDataUniformBlockSize, nullptr, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
     // bind is needed
     glBindBuffer(GL_UNIFORM_BUFFER, g_perFrameDataBufferHandle);
     g_perFramePersistentPtr = (PerFrameData *)glMapBufferRange(
@@ -502,7 +519,7 @@ int main()
     glCreateBuffers(1, &g_instancingOffsetBufferHandle);
     // static and immutable
     glNamedBufferStorage(g_instancingOffsetBufferHandle,
-                         g_instancingOffsetBufferSize, &cubePositions[0], 0);
+                         g_instancingOffsetUniformBlockSize, &cubePositions[0], 0);
 
     // // textures
     g_texture2d_1 = make_unique<Texture>(
