@@ -94,9 +94,15 @@ vec3f cubePositions[NUM_CUBES] = {
 
 // GLuint shaderProgramHandle;
 std::unique_ptr<Pipeline> g_ShaderProgramPipeline;
+std::unique_ptr<Shader> g_VertexShader;
+std::unique_ptr<Shader> g_FragmentShader;
+
 std::unique_ptr<Texture> g_texture2d_1;
 GLuint g_bindlessHandleUniformBufferHandle;
-unsigned int VAO;
+
+// vertex data related
+GLuint g_VBO;
+GLuint g_VAO;
 
 // camera controller
 Camera camera(
@@ -140,6 +146,10 @@ struct DrawArraysIndirectCommand
     GLuint first;
     GLuint baseInstance;
 };
+
+// occultion query against depth/stencil test
+GLuint g_query;
+
 // camera controller
 float g_dt{0.0f};
 float g_lastFrameTime{0.0f};
@@ -358,10 +368,62 @@ void update()
 {
 }
 
+void initQuery()
+{
+    // after 4.5
+    glCreateQueries(GL_ANY_SAMPLES_PASSED_CONSERVATIVE, 1, &g_query);
+}
+
+// about the data
+void initBuffer()
+{
+    glGenBuffers(1, &g_VBO);
+    // glGenBuffers(1, &EBO);
+    glBindBuffer(GL_ARRAY_BUFFER, g_VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    // glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    // glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+}
+
+// about the data layout, how gpu inteprete it
+void initVAO()
+{
+    // VAO includes all the vertex attribute buffer (<=16) + element buffer
+    glGenVertexArrays(1, &g_VAO);
+    glBindVertexArray(g_VAO);
+    // interleave
+    // two vertex attributes
+    // position attribute: slot 0
+    // stride = 3 + 3 + 2
+    // to be more precise, instead of hard-coded 0
+    const auto posLoc = glGetAttribLocation(g_VertexShader->programHandle(), "aPos");
+    // assert(posLoc >= 0);
+    glVertexAttribPointer(posLoc, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(posLoc);
+    // color attribute: slot 1
+    const auto colorLoc = glGetAttribLocation(g_VertexShader->programHandle(), "aColor");
+    // assert(colorLoc >= 0);
+    glVertexAttribPointer(colorLoc, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+    glEnableVertexAttribArray(colorLoc);
+    // texture coord attribute: slot2, uv
+    const auto texCoordLoc = glGetAttribLocation(g_VertexShader->programHandle(), "aTexCoord");
+    // assert(texCoordLoc >= 0);
+    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+    glEnableVertexAttribArray(texCoordLoc);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // instanced rendering a separate buffer, count is the instance count
+}
+
 void render()
 {
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+    // glClearBufferiv for the attachment to the fbo
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // 0: swapchain buffer fbo
+    glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     g_ShaderProgramPipeline->bind();
     mat4x4f identity(1.0f);
@@ -383,7 +445,7 @@ void render()
     auto mvp = MatrixMultiply4x4(identity, vp);
 
     // bind vao
-    glBindVertexArray(VAO);
+    glBindVertexArray(g_VAO);
     // bind uniform buffers
     // buffer is genric, here bind it to unifor buffer, tell driver the usage of this buffer.
     // ub slot: 0
@@ -411,7 +473,14 @@ void render()
     // glDrawArraysInstanced(GL_TRIANGLES, 0, 36, NUM_CUBES);
     // glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, NUM_CUBES, 0);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g_indirectDrawBufferHandle);
+    glBeginQuery(GL_ANY_SAMPLES_PASSED_CONSERVATIVE, g_query);
     glDrawArraysIndirect(GL_TRIANGLES, 0);
+    glEndQuery(GL_ANY_SAMPLES_PASSED_CONSERVATIVE);
+
+    GLuint64 samplePassed;
+    glGetQueryObjectui64v(g_query, GL_QUERY_RESULT, &samplePassed);
+    cout << "samplePassed: " << samplePassed << endl;
+
     // for (unsigned int i = 0; i < NUM_CUBES; ++i)
     // {
     //     auto t = MatrixMultiply4x4(MatrixTranslation4x4(
@@ -467,57 +536,37 @@ int main()
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
     glDebugMessageCallback(GLDebugMessageCallback, nullptr);
 
-    const auto vs = Shader("assets/shaders/test.vert");
-    const auto fs = Shader("assets/shaders/test.frag");
-    // uniform block
-    g_perFrameDataBufferHandle = glGetUniformBlockIndex(vs.programHandle(), "perFrameData");
-    g_instancingOffsetUniformBlockHandle = glGetUniformBlockIndex(vs.programHandle(), "instancingData");
+    g_VertexShader = make_unique<Shader>("assets/shaders/test.vert");
+    g_FragmentShader = make_unique<Shader>("assets/shaders/test.frag");
+    const auto vsHandle = g_VertexShader->programHandle();
+    const auto fsHandle = g_FragmentShader->programHandle();
 
-    glGetActiveUniformBlockiv(vs.programHandle(), g_perFrameDataBufferHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
+    // uniform block
+    g_perFrameDataBufferHandle = glGetUniformBlockIndex(vsHandle, "perFrameData");
+    g_instancingOffsetUniformBlockHandle = glGetUniformBlockIndex(vsHandle, "instancingData");
+
+    glGetActiveUniformBlockiv(vsHandle, g_perFrameDataBufferHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
                               &g_perFrameDataUniformBlockSize);
-    glGetActiveUniformBlockiv(vs.programHandle(), g_instancingOffsetUniformBlockHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
+    glGetActiveUniformBlockiv(vsHandle, g_instancingOffsetUniformBlockHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
                               &g_instancingOffsetUniformBlockSize);
     // subroutine (function pointer)
-    g_subroutineTextureScalerUniformHandle = glGetSubroutineUniformLocation(fs.programHandle(), GL_FRAGMENT_SHADER, "TextureScaler");
-    g_TextureUpscaler = glGetSubroutineIndex(fs.programHandle(), GL_FRAGMENT_SHADER, "scale4Up");
-    g_TextureDownscaler = glGetSubroutineIndex(fs.programHandle(), GL_FRAGMENT_SHADER, "scale4Down");
+    g_subroutineTextureScalerUniformHandle = glGetSubroutineUniformLocation(fsHandle, GL_FRAGMENT_SHADER, "TextureScaler");
+    g_TextureUpscaler = glGetSubroutineIndex(fsHandle, GL_FRAGMENT_SHADER, "scale4Up");
+    g_TextureDownscaler = glGetSubroutineIndex(fsHandle, GL_FRAGMENT_SHADER, "scale4Down");
     assert(g_subroutineTextureScalerUniformHandle >= 0);
     assert(g_TextureUpscaler >= 0);
     assert(g_TextureDownscaler >= 0);
 
     g_ShaderProgramPipeline = make_unique<Pipeline>(unordered_map<GLenum, GLuint>{
-        {GL_VERTEX_SHADER_BIT, vs.programHandle()},
-        {GL_FRAGMENT_SHADER_BIT, fs.programHandle()},
+        {GL_VERTEX_SHADER_BIT, vsHandle},
+        {GL_FRAGMENT_SHADER_BIT, fsHandle},
     });
 
-    unsigned int VBO;
-    // VAO includes all the vertex attribute buffer (<=16) + element buffer
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    // glGenBuffers(1, &EBO);
+    initBuffer();
 
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    initVAO();
 
-    // glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    // glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    // interleave
-    // two vertex attributes
-    // position attribute: slot 0
-    // stride = 3 + 3 + 2
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    // color attribute: slot 1
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    // texture coord attribute: slot2, uv
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    initQuery();
 
     // uniform buffer
     // requires opengl 4.5
@@ -656,8 +705,8 @@ int main()
         glfwPollEvents();
     }
 
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
+    glDeleteVertexArrays(1, &g_VAO);
+    glDeleteBuffers(1, &g_VBO);
     if (g_perFramePersistentPtr)
     {
         glBindBuffer(GL_UNIFORM_BUFFER, g_perFrameDataBufferHandle);
