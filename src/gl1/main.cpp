@@ -126,6 +126,11 @@ GLuint g_instancingOffsetBufferHandle;
 GLint g_instancingOffsetUniformBlockSize;
 const GLsizeiptr g_instancingOffsetBufferSize = sizeof(PerFrameData);
 
+// sub-routine
+GLuint g_subroutineTextureScalerUniformHandle;
+GLuint g_TextureUpscaler;
+GLuint g_TextureDownscaler;
+
 // indirect-draw buffer handle
 GLuint g_indirectDrawBufferHandle;
 struct DrawArraysIndirectCommand
@@ -399,6 +404,10 @@ void render()
     glBindBufferBase(GL_UNIFORM_BUFFER, MATERIAL, g_bindlessHandleUniformBufferHandle);
     // cube position buffer
     glBindBufferBase(GL_UNIFORM_BUFFER, INSTANCING, g_instancingOffsetBufferHandle);
+
+    // select subroutine fp: texture scaler
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &g_TextureDownscaler);
+
     // glDrawArraysInstanced(GL_TRIANGLES, 0, 36, NUM_CUBES);
     // glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, NUM_CUBES, 0);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g_indirectDrawBufferHandle);
@@ -458,8 +467,9 @@ int main()
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
     glDebugMessageCallback(GLDebugMessageCallback, nullptr);
 
-    const auto vs = Shader("shaders/test.vert");
-    const auto fs = Shader("shaders/test.frag");
+    const auto vs = Shader("assets/shaders/test.vert");
+    const auto fs = Shader("assets/shaders/test.frag");
+    // uniform block
     g_perFrameDataBufferHandle = glGetUniformBlockIndex(vs.programHandle(), "perFrameData");
     g_instancingOffsetUniformBlockHandle = glGetUniformBlockIndex(vs.programHandle(), "instancingData");
 
@@ -467,6 +477,13 @@ int main()
                               &g_perFrameDataUniformBlockSize);
     glGetActiveUniformBlockiv(vs.programHandle(), g_instancingOffsetUniformBlockHandle, GL_UNIFORM_BLOCK_DATA_SIZE,
                               &g_instancingOffsetUniformBlockSize);
+    // subroutine (function pointer)
+    g_subroutineTextureScalerUniformHandle = glGetSubroutineUniformLocation(fs.programHandle(), GL_FRAGMENT_SHADER, "TextureScaler");
+    g_TextureUpscaler = glGetSubroutineIndex(fs.programHandle(), GL_FRAGMENT_SHADER, "scale4Up");
+    g_TextureDownscaler = glGetSubroutineIndex(fs.programHandle(), GL_FRAGMENT_SHADER, "scale4Down");
+    assert(g_subroutineTextureScalerUniformHandle >= 0);
+    assert(g_TextureUpscaler >= 0);
+    assert(g_TextureDownscaler >= 0);
 
     g_ShaderProgramPipeline = make_unique<Pipeline>(unordered_map<GLenum, GLuint>{
         {GL_VERTEX_SHADER_BIT, vs.programHandle()},
@@ -524,7 +541,7 @@ int main()
     // // textures
     g_texture2d_1 = make_unique<Texture>(
         GL_TEXTURE_2D,
-        "textures/dame.jpeg");
+        "assets/textures/dame.jpeg");
 
     // bindless uint64_t handle
     const auto bindlessTextureHandle = g_texture2d_1->getBindlessHandle();

@@ -1,5 +1,5 @@
-#include <shaders/shadeCommon.h>
-#include <shaders/common.h>
+#include <assets/shaders/shadeCommon.h>
+#include <assets/shaders/common.h>
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
@@ -14,9 +14,10 @@ layout(std140, binding = INSTANCING) uniform instancingData {
     uniform vec3 offsets[10];
 } InstancingData;
 
+// interface block
 out block
 {
-    vec2 TexCoord;
+    layout(location=1) vec2 TexCoord;
 } Out;
 
 // ARB_separate_shader_objects requires built-in block gl_PerVertex to be redeclared before accessing its members
