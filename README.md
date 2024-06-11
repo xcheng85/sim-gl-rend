@@ -49,11 +49,42 @@ glCreateProgram
 glAttachShader
 glLinkProgram
 
-### compilation and link (new-way, > 4.1)
+### compilation and link (new-way, > 4.1), separate shader object
 
 glCreateShaderProgramv
 glCreateProgramPipelines
 glUseProgramStages
+
+gen-bind-delete for pipeline as well
+
+glCreateProgramPipelines
+glBindProgramPipeline
+glDeleteProgramPipelines
+
+caution: 
+// to use separate shader object, the following is needed
+// ARB_separate_shader_objects requires built-in block gl_PerVertex to be redeclared before accessing its members
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+// bindless for uniform
+glProgramUniform* vs bind version glUniform*
+
+
+## binary shader
+https://www.khronos.org/opengl/wiki/Shader_Compilation
+### gl style 
+
+### spir-v + glsl
+glslang, 
+
+specialization constant: better alternative to macron (remember what I did in cgg ? )
+
+compilation
+IP: obfuscation
+
 
 
 ## subroutine vs c++ function pointer

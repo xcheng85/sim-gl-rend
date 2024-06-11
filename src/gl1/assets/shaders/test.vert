@@ -20,6 +20,7 @@ out block
     layout(location=1) vec2 TexCoord;
 } Out;
 
+// to use separate shader object, the following is needed
 // ARB_separate_shader_objects requires built-in block gl_PerVertex to be redeclared before accessing its members
 out gl_PerVertex
 {

@@ -11,6 +11,7 @@
 using namespace std;
 
 // reuse shader program
+// gen-bind-delete for pipeline
 class Pipeline
 {
 public:
